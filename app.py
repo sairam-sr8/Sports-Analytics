@@ -161,15 +161,17 @@ class VideoProcessor:
              ]]
              pred = self.ai_model.predict(X_input)[0]
              is_good = (pred == 1)
-             label = "✅ PERFECT FORM" if is_good else "❌ BAD TECHNIQUE"
+             label = "PERFECT FORM" if is_good else "BAD TECHNIQUE"
              color = (0, 255, 0) if is_good else (0, 0, 255)
              
-             # Also write telemetry explicitly on camera feed
-             cv2.putText(out_img, f"Right Elbow: {int(features['right_elbow_angle'])}", (30, 100), cv2.FONT_HERSHEY_DUPLEX, 0.8, (255, 255, 255), 2)
-             cv2.putText(out_img, f"Left Knee: {int(features['left_knee_bend'])}", (30, 130), cv2.FONT_HERSHEY_DUPLEX, 0.8, (255, 255, 255), 2)
-             cv2.putText(out_img, label, (30, 60), cv2.FONT_HERSHEY_DUPLEX, 1.2, color, 2)
+             # Also write telemetry explicitly on camera feed (with massive black box for high contrast on phones!)
+             cv2.rectangle(out_img, (10, 10), (700, 160), (0, 0, 0), -1)
+             cv2.putText(out_img, label, (30, 60), cv2.FONT_HERSHEY_DUPLEX, 1.5, color, 3)
+             cv2.putText(out_img, f"Right Elbow Angle: {int(features['right_elbow_angle'])}", (30, 105), cv2.FONT_HERSHEY_DUPLEX, 1.0, (255, 255, 255), 3)
+             cv2.putText(out_img, f"Front Knee Bend: {int(features['left_knee_bend'])}", (30, 145), cv2.FONT_HERSHEY_DUPLEX, 1.0, (255, 255, 255), 3)
         else:
-             cv2.putText(out_img, "Searching...", (30, 60), cv2.FONT_HERSHEY_DUPLEX, 1.2, (0, 255, 255), 2)
+             cv2.rectangle(out_img, (10, 10), (400, 80), (0, 0, 0), -1)
+             cv2.putText(out_img, "Searching...", (30, 60), cv2.FONT_HERSHEY_DUPLEX, 1.5, (0, 255, 255), 3)
              
         return av.VideoFrame.from_ndarray(out_img, format="bgr24")
 
