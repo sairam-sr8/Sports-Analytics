@@ -14,6 +14,12 @@ import tempfile
 import time
 import os
 import joblib
+import av
+from streamlit_webrtc import webrtc_streamer, WebRtcMode, RTCConfiguration
+
+RTC_CONFIGURATION = RTCConfiguration(
+    {"iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]}
+)
 
 # Must add 'src' to path so Streamlit can find our engine
 import sys
@@ -101,12 +107,12 @@ with st.sidebar:
     
     st.divider()
     
-    upload_method = st.radio("Choose Video Source:", ["Upload My Own Video", "Use Sample Video"])
+    upload_method = st.radio("Choose Video Source:", ["Upload My Own Video", "Use Sample Video", "Live Camera Feed"])
     
     video_file = None
     if upload_method == "Upload My Own Video":
         video_file = st.file_uploader("Upload .mp4 file", type=['mp4', 'mov', 'avi'])
-    else:
+    elif upload_method == "Use Sample Video":
         sample_path = "videos/samples/test_batting_sample.mp4"
         if os.path.exists(sample_path):
             if st.button("Load Sample Video"):
@@ -127,6 +133,62 @@ with st.sidebar:
 # ====================================================================
 # VIDEO PROCESSING LOOP
 # ====================================================================
+
+# ── WEBRTC LIVE FEATURE ─────────────────────────────────────────────
+class VideoProcessor:
+    def __init__(self):
+        # We initialize detector inside the processor to avoid thread lock issues across WebRTC backend
+        self.detector = PoseDetector(smoothing_window=5)
+        self.extractor = FeatureExtractor()
+        self.ai_model = ai_model
+        self.global_timestamp_ms = 0
+        
+    def recv(self, frame):
+        img = frame.to_ndarray(format="bgr24")
+        self.global_timestamp_ms += 33
+        
+        # Process the raw camera pixels
+        out_img, landmarks = self.detector.process_frame(img, self.global_timestamp_ms)
+        features = self.extractor.extract_features(landmarks)
+        
+        # Calculate scores identically to standard uploads
+        if features and self.ai_model:
+             X_input = [[
+                features['right_elbow_angle'], 
+                features['left_elbow_angle'], 
+                features['right_knee_bend'], 
+                features['left_knee_bend']
+             ]]
+             pred = self.ai_model.predict(X_input)[0]
+             is_good = (pred == 1)
+             label = "✅ PERFECT FORM" if is_good else "❌ BAD TECHNIQUE"
+             color = (0, 255, 0) if is_good else (0, 0, 255)
+             
+             # Also write telemetry explicitly on camera feed
+             cv2.putText(out_img, f"Right Elbow: {int(features['right_elbow_angle'])}", (30, 100), cv2.FONT_HERSHEY_DUPLEX, 0.8, (255, 255, 255), 2)
+             cv2.putText(out_img, f"Left Knee: {int(features['left_knee_bend'])}", (30, 130), cv2.FONT_HERSHEY_DUPLEX, 0.8, (255, 255, 255), 2)
+             cv2.putText(out_img, label, (30, 60), cv2.FONT_HERSHEY_DUPLEX, 1.2, color, 2)
+        else:
+             cv2.putText(out_img, "Searching...", (30, 60), cv2.FONT_HERSHEY_DUPLEX, 1.2, (0, 255, 255), 2)
+             
+        return av.VideoFrame.from_ndarray(out_img, format="bgr24")
+
+
+if upload_method == "Live Camera Feed":
+    st.markdown("### Live Evaluation Dashboard (Webcam)")
+    st.info("💡 Make sure to give browser permissions to your Camera. Wait 5-10 seconds for the cloud connection to establish the first time.")
+    
+    webrtc_streamer(
+        key="cricket-live",
+        mode=WebRtcMode.SENDRECV,
+        rtc_configuration=RTC_CONFIGURATION,
+        video_processor_factory=VideoProcessor,
+        media_stream_constraints={"video": True, "audio": False},
+        async_processing=True
+    )
+    
+    st.stop()  # Halt execution here so we don't accidentally drop into standard file upload logic
+
 
 ready_to_play = False
 temp_video = None
