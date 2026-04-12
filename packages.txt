@@ -1,0 +1,9 @@
+pkg-config
+cmake
+libavformat-dev
+libavcodec-dev
+libavdevice-dev
+libavutil-dev
+libswscale-dev
+libswresample-dev
+libavfilter-dev
