@@ -183,7 +183,7 @@ if upload_method == "Live Camera Feed":
         mode=WebRtcMode.SENDRECV,
         rtc_configuration=RTC_CONFIGURATION,
         video_processor_factory=VideoProcessor,
-        media_stream_constraints={"video": True, "audio": False},
+        media_stream_constraints={"video": {"facingMode": "environment"}, "audio": False},
         async_processing=True
     )
     
