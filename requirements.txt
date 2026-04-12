@@ -1,0 +1,25 @@
+# ============================================================
+# Cricket Biomechanics Analyzer - Requirements
+# Install all of these with: pip install -r requirements.txt
+# ============================================================
+
+# Core Computer Vision
+opencv-python>=4.8.0          # Reads/writes video files, draws on frames
+mediapipe>=0.10.9             # Google's pose detection (the "digital x-ray")
+
+# Math & Data
+numpy>=1.24.0                 # Fast array math (used for angle calculations)
+pandas>=2.0.0                 # Organizes data into tables/CSV files
+
+# Machine Learning
+scikit-learn>=1.3.0           # Train & test the technique classifier AI
+
+# Web App
+streamlit>=1.30.0             # Builds our web interface (Sprint 4)
+
+# Visualization
+matplotlib>=3.7.0             # Plots graphs and charts
+seaborn>=0.12.0               # Beautiful statistical plots
+
+# Video Downloading (for sample videos)
+yt-dlp>=2024.1.0              # Downloads videos from YouTube safely

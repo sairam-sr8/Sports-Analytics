@@ -1,0 +1,13 @@
+cricket_env/
+__pycache__/
+.DS_Store
+
+# Ignore large video datasets
+videos/good/
+videos/bad/
+videos/*.mp4
+videos/*.avi
+videos/*.mov
+
+# Allow the sample video if present
+!videos/samples/
