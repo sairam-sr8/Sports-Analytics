@@ -4,7 +4,7 @@
 # ============================================================
 
 # Core Computer Vision
-opencv-python>=4.8.0          # Reads/writes video files, draws on frames
+opencv-python-headless>=4.8.0       # Reads/writes video files, draws on frames
 mediapipe>=0.10.9             # Google's pose detection (the "digital x-ray")
 
 # Math & Data
