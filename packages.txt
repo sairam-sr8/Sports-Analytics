@@ -7,3 +7,7 @@ libavutil-dev
 libswscale-dev
 libswresample-dev
 libavfilter-dev
+libgl1
+libsm6
+libxrender1
+libxext6
