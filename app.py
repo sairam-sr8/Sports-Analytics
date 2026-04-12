@@ -17,8 +17,14 @@ import joblib
 import av
 from streamlit_webrtc import webrtc_streamer, WebRtcMode, RTCConfiguration
 
+# We must include a TURN server so smartphones on 5G/Cellular can pierce the strict carrier NATs!
 RTC_CONFIGURATION = RTCConfiguration(
-    {"iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]}
+    {"iceServers": [
+        {"urls": ["stun:stun.l.google.com:19302"]},
+        {"urls": ["turn:openrelay.metered.ca:80"], "username": "openrelayproject", "credential": "openrelayproject"},
+        {"urls": ["turn:openrelay.metered.ca:443"], "username": "openrelayproject", "credential": "openrelayproject"},
+        {"urls": ["turn:openrelay.metered.ca:443?transport=tcp"], "username": "openrelayproject", "credential": "openrelayproject"}
+    ]}
 )
 
 # Must add 'src' to path so Streamlit can find our engine
