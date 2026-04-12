@@ -8,6 +8,8 @@ libswscale-dev
 libswresample-dev
 libavfilter-dev
 libgl1
+libgl1-mesa-glx
+libglib2.0-0
 libsm6
 libxrender1
 libxext6
