@@ -1,0 +1,29 @@
+{
+  "feature_columns": [
+    "right_elbow_angle",
+    "left_elbow_angle",
+    "right_shoulder_elevation",
+    "left_shoulder_elevation",
+    "shoulder_rotation_angle",
+    "wrist_height_diff",
+    "bat_swing_arc",
+    "right_knee_bend",
+    "left_knee_bend",
+    "right_hip_angle",
+    "left_hip_angle",
+    "hip_rotation_angle",
+    "trunk_lean_angle",
+    "spine_angle",
+    "center_of_mass_x",
+    "center_of_mass_y",
+    "feet_width_ratio",
+    "weight_distribution",
+    "head_stability_x",
+    "head_stability_y",
+    "follow_through_angle",
+    "backlift_height"
+  ],
+  "rf_accuracy": 0.9117,
+  "rf_f1": 0.9108,
+  "cv_mean": 0.6482
+}

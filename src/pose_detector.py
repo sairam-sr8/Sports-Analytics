@@ -175,7 +175,7 @@ class PoseDetector:
     RIGHT_ANKLE     = 28
 
     # Default path to the MediaPipe model file
-    DEFAULT_MODEL_PATH = os.path.join("models", "pose_landmarker_full.task")
+    DEFAULT_MODEL_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "models", "pose_landmarker_full.task")
 
     def __init__(self, model_path=None, min_pose_detection_confidence=0.5,
                  min_tracking_confidence=0.5, smoothing_window=5):
@@ -418,7 +418,18 @@ class PoseDetector:
             frame_output: The frame with skeleton drawn on it.
             landmarks: Smoothed landmarks of the primary person, or None.
         """
-        frame_rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
+        # OPTIMIZATION: Resize large frames to max 720p to speed up processing
+        # MediaPipe internal processing is fixed resolution anyway (256x256)
+        # so sending 4K images just slows down the pipeline with no benefit.
+        h, w = frame_bgr.shape[:2]
+        max_dim = max(h, w)
+        if max_dim > 1280:
+            scale = 1280 / max_dim
+            proc_frame = cv2.resize(frame_bgr, (int(w * scale), int(h * scale)))
+        else:
+            proc_frame = frame_bgr
+            
+        frame_rgb = cv2.cvtColor(proc_frame, cv2.COLOR_BGR2RGB)
         mp_image  = mp.Image(image_format=mp.ImageFormat.SRGB, data=frame_rgb)
 
         # Run detection — may find 0, 1, 2, or 3 people
