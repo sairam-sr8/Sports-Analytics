@@ -108,9 +108,11 @@ with st.sidebar:
     if upload_method == "Upload Video":
         video_file = st.file_uploader("Upload .mp4", type=['mp4','mov','avi'])
     elif upload_method == "Sample Video":
-        sample_path = "videos/samples/test_batting_sample.mp4"
-        if os.path.exists(sample_path):
-            if st.button("Load Sample"): st.session_state['sample_loaded'] = True
+        import glob
+        sample_videos = glob.glob(os.path.join("videos", "samples", "*.mp4"))
+        if sample_videos:
+            st.session_state['sample_path'] = sample_videos[0]
+            if st.button(f"Load Sample ({os.path.basename(sample_videos[0])})"): st.session_state['sample_loaded'] = True
         else:
             st.warning("Sample video not found.")
 
@@ -304,7 +306,8 @@ with tab_analyze:
         temp_video, ready = t, True
     elif upload_method == "Sample Video" and st.session_state.get('sample_loaded'):
         t = tempfile.NamedTemporaryFile(delete=False, suffix='.mp4')
-        with open("videos/samples/test_batting_sample.mp4","rb") as f: t.write(f.read())
+        sample_path = st.session_state.get('sample_path', "videos/samples/test_batting_sample.mp4")
+        with open(sample_path,"rb") as f: t.write(f.read())
         t.close(); temp_video, ready = t, True
 
     if not ready:
