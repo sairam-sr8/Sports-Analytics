@@ -271,15 +271,21 @@ with tab_analyze:
                     phase_id, phase_name, _ = self.phase_det.detect_phase(feats)
                     shot_id, shot_name, _   = self.shot_cls.classify_frame(feats)
                     overall = scores['overall_score']
-                    # Minimal HUD: just a small score badge, no cluttered text
+                    # Rich HUD drawn directly on the live video frame
                     color_bgr = (0,255,136) if overall > 70 else (0,165,255) if overall > 50 else (0,0,255)
-                    cv2.rectangle(out, (8, 8), (200, 48), (0, 0, 0), -1)
-                    cv2.putText(out, f"{overall}/100", (16, 38),
-                                cv2.FONT_HERSHEY_DUPLEX, 1.0, color_bgr, 2)
+                    
+                    overlay = out.copy()
+                    cv2.rectangle(overlay, (8, 8), (320, 200), (0, 0, 0), -1)
+                    out = cv2.addWeighted(overlay, 0.6, out, 0.4, 0)
+                    
+                    cv2.putText(out, f"Overall: {overall}/100", (16, 40), cv2.FONT_HERSHEY_DUPLEX, 0.8, color_bgr, 2)
+                    cv2.putText(out, f"Balance: {scores['balance_score']} | Stability: {scores['stability_score']}", (16, 75), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255,255,255), 1)
+                    cv2.putText(out, f"Power: {scores['power_score']} | Timing: {scores['timing_score']}", (16, 105), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255,255,255), 1)
+                    cv2.putText(out, f"Phase: {phase_name}", (16, 145), cv2.FONT_HERSHEY_DUPLEX, 0.65, (255,200,0), 1)
+                    cv2.putText(out, f"Shot: {shot_name}", (16, 180), cv2.FONT_HERSHEY_DUPLEX, 0.65, (255,100,255), 1)
                 else:
                     cv2.rectangle(out, (8, 8), (260, 48), (0, 0, 0), -1)
-                    cv2.putText(out, "Detecting...", (16, 38),
-                                cv2.FONT_HERSHEY_DUPLEX, 0.9, (0, 200, 255), 2)
+                    cv2.putText(out, "Detecting...", (16, 38), cv2.FONT_HERSHEY_DUPLEX, 0.9, (0, 200, 255), 2)
 
                 return av.VideoFrame.from_ndarray(out, format="bgr24")
 
