@@ -301,20 +301,24 @@ with tab_analyze:
         if ctx.state.playing:
             st.info("🔴 Recording in progress. Perform your shot, then click **Stop**!")
 
-        elif not ctx.state.playing and ctx.video_processor and len(ctx.video_processor.frames) > 0:
-            st.success(f"✅ Captured {len(ctx.video_processor.frames)} frames. Compiling video for full analysis...")
-            frames = ctx.video_processor.frames
-            t = tempfile.NamedTemporaryFile(delete=False, suffix='.mp4')
-            out_path = t.name; t.close()
-            h, w, _ = frames[0].shape
-            writer = cv2.VideoWriter(out_path, cv2.VideoWriter_fourcc(*'mp4v'), 30.0, (w, h))
-            for fr in frames: writer.write(fr)
-            writer.release()
-            st.session_state['live_recorded_path'] = out_path
-            st.session_state['live_scores']   = ctx.video_processor.all_scores
-            st.session_state['live_features'] = ctx.video_processor.all_features
-            ctx.video_processor.frames = []
-            st.rerun()
+        elif not ctx.state.playing:
+            vp = ctx.video_processor
+            frames = getattr(vp, 'frames', []) if vp else []
+            if frames:
+                st.success(f"✅ Captured {len(frames)} frames. Compiling video...")
+                t = tempfile.NamedTemporaryFile(delete=False, suffix='.mp4')
+                out_path = t.name; t.close()
+                h, w, _ = frames[0].shape
+                writer = cv2.VideoWriter(out_path, cv2.VideoWriter_fourcc(*'mp4v'), 30.0, (w, h))
+                for fr in frames: writer.write(fr)
+                writer.release()
+                st.session_state['live_recorded_path'] = out_path
+                st.session_state['live_scores']   = getattr(vp, 'all_scores', [])
+                st.session_state['live_features'] = getattr(vp, 'all_features', [])
+                vp.frames = []
+                st.rerun()
+            elif st.session_state.get('live_recorded_path'):
+                st.success("✅ Recording ready! Click **▶ START ANALYSIS** in the sidebar.")
 
         st.stop()
 
