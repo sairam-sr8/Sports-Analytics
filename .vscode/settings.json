@@ -1,0 +1,10 @@
+{
+    "javascript.preferGoToSourceDefinition": true,
+    "typescript.experimental.useTsgo": false,
+    "typescript.preferGoToSourceDefinition": true,
+    "editor.wordWrap": "on",
+    "editor.allowVariableFontsInAccessibilityMode": true,
+    "editor.autoIndentOnPaste": true,
+    "editor.codeActions.triggerOnFocusChange": true,
+    "editor.bracketPairColorization.independentColorPoolPerBracketType": true
+}

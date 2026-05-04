@@ -11,3 +11,10 @@ videos/*.mov
 
 # Allow the sample video if present
 !videos/samples/
+
+# Ignore large generated data
+data/*.csv
+data/*.db
+reports/*.pdf
+logs/
+videos/samples/test_output_with_skeleton.mp4
