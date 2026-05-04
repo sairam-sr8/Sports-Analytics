@@ -248,46 +248,17 @@ with tab_analyze:
 
         class LiveProcessor:
             def __init__(self):
-                self.detector   = PoseDetector(smoothing_window=5)
-                self.extractor  = FeatureExtractor()
-                self.scorer_eng = BiomechanicsScorer()
-                self.phase_det  = PhaseDetector()
-                self.shot_cls   = ShotClassifier()
-                self.ts = 0
-                self.all_scores = []
-                self.all_features = []
+                self.frames = []
 
             def recv(self, frame):
                 img = frame.to_ndarray(format="bgr24")
-                self.ts += 33
-                out, lm = self.detector.process_frame(img, self.ts)
-                feats = self.extractor.extract_features(lm)
-
-                if feats:
-                    scores = self.scorer_eng.score_features(feats)
-                    self.all_scores.append(scores)
-                    self.all_features.append(feats)
-                    
-                    phase_id, phase_name, _ = self.phase_det.detect_phase(feats)
-                    shot_id, shot_name, _   = self.shot_cls.classify_frame(feats)
-                    overall = scores['overall_score']
-                    # Rich HUD drawn directly on the live video frame
-                    color_bgr = (0,255,136) if overall > 70 else (0,165,255) if overall > 50 else (0,0,255)
-                    
-                    overlay = out.copy()
-                    cv2.rectangle(overlay, (8, 8), (320, 200), (0, 0, 0), -1)
-                    out = cv2.addWeighted(overlay, 0.6, out, 0.4, 0)
-                    
-                    cv2.putText(out, f"Overall: {overall}/100", (16, 40), cv2.FONT_HERSHEY_DUPLEX, 0.8, color_bgr, 2)
-                    cv2.putText(out, f"Balance: {scores['balance_score']} | Stability: {scores['stability_score']}", (16, 75), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255,255,255), 1)
-                    cv2.putText(out, f"Power: {scores['power_score']} | Timing: {scores['timing_score']}", (16, 105), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255,255,255), 1)
-                    cv2.putText(out, f"Phase: {phase_name}", (16, 145), cv2.FONT_HERSHEY_DUPLEX, 0.65, (255,200,0), 1)
-                    cv2.putText(out, f"Shot: {shot_name}", (16, 180), cv2.FONT_HERSHEY_DUPLEX, 0.65, (255,100,255), 1)
-                else:
-                    cv2.rectangle(out, (8, 8), (260, 48), (0, 0, 0), -1)
-                    cv2.putText(out, "Detecting...", (16, 38), cv2.FONT_HERSHEY_DUPLEX, 0.9, (0, 200, 255), 2)
-
-                return av.VideoFrame.from_ndarray(out, format="bgr24")
+                self.frames.append(img)
+                
+                # Draw a recording indicator
+                cv2.circle(img, (30, 30), 10, (0, 0, 255), -1)
+                cv2.putText(img, "REC", (50, 38), cv2.FONT_HERSHEY_DUPLEX, 0.8, (0, 0, 255), 2)
+                
+                return av.VideoFrame.from_ndarray(img, format="bgr24")
 
         ctx = webrtc_streamer(key="live", mode=WebRtcMode.SENDRECV,
                         rtc_configuration=RTC_CONFIGURATION,
@@ -296,11 +267,25 @@ with tab_analyze:
                         async_processing=True)
                         
         if ctx.state.playing:
-            st.info("🔴 Live recording in progress. Stop the stream to save your session.")
-        elif not ctx.state.playing and ctx.video_processor:
-            if hasattr(ctx.video_processor, 'all_scores') and len(ctx.video_processor.all_scores) > 0:
-                st.success(f"Captured {len(ctx.video_processor.all_scores)} frames. Saving session...")
-                render_session_summary(ctx.video_processor.all_scores, ctx.video_processor.all_features, "Live Camera Feed")
+            st.info("🔴 Live recording in progress. Perform your shot, then click Stop!")
+        elif not ctx.state.playing and ctx.video_processor and len(ctx.video_processor.frames) > 0:
+            frames = ctx.video_processor.frames
+            st.success(f"Captured {len(frames)} frames. Compiling video...")
+            
+            t = tempfile.NamedTemporaryFile(delete=False, suffix='.mp4')
+            out_path = t.name
+            t.close()
+            
+            height, width, _ = frames[0].shape
+            fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+            out = cv2.VideoWriter(out_path, fourcc, 30.0, (width, height))
+            for f in frames:
+                out.write(f)
+            out.release()
+            
+            st.session_state['live_recorded_path'] = out_path
+            ctx.video_processor.frames = []  # Clear memory
+            st.rerun() # Trigger rerun to load the video into the pipeline
                 
         st.stop()
 
@@ -315,6 +300,10 @@ with tab_analyze:
         base_dir = os.path.dirname(os.path.abspath(__file__))
         sample_path = st.session_state.get('sample_path', os.path.join(base_dir, "videos", "samples", "test_batting_sample.mp4"))
         with open(sample_path,"rb") as f: t.write(f.read())
+        t.close(); temp_video, ready = t, True
+    elif upload_method == "Live Camera" and st.session_state.get('live_recorded_path'):
+        t = tempfile.NamedTemporaryFile(delete=False, suffix='.mp4')
+        with open(st.session_state['live_recorded_path'],"rb") as f: t.write(f.read())
         t.close(); temp_video, ready = t, True
 
     if not ready:
