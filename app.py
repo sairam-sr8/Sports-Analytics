@@ -246,6 +246,12 @@ with tab_analyze:
         st.markdown("### 📡 Live Biomechanics Feed")
         st.info("Allow camera access. Takes 5–10s to connect via cloud relay.")
 
+        # Pre-create the output file path BEFORE the processor starts
+        # so recv() can write to it immediately without needing session_state
+        import uuid
+        live_out_path = os.path.join(tempfile.gettempdir(), f"live_{uuid.uuid4().hex}.mp4")
+        st.session_state['_live_out_path'] = live_out_path
+
         class LiveProcessor:
             def __init__(self):
                 self.detector   = PoseDetector(smoothing_window=5)
@@ -254,9 +260,13 @@ with tab_analyze:
                 self.phase_det  = PhaseDetector()
                 self.shot_cls   = ShotClassifier()
                 self.ts = 0
-                self.frames = []         # raw frames for recording
-                self.all_scores = []
+                self.writer     = None   # VideoWriter opened on first frame
+                self.all_scores   = []
                 self.all_features = []
+                self.frame_count  = 0
+                # Use the pre-created path
+                import uuid as _uuid
+                self._out_path = os.path.join(tempfile.gettempdir(), f"live_{_uuid.uuid4().hex}.mp4")
 
             def recv(self, frame):
                 img = frame.to_ndarray(format="bgr24")
@@ -285,12 +295,31 @@ with tab_analyze:
                     cv2.rectangle(out, (8, 8), (280, 48), (0, 0, 0), -1)
                     cv2.putText(out, "Detecting pose...", (16, 38), cv2.FONT_HERSHEY_DUPLEX, 0.8, (0, 200, 255), 2)
 
-                # Record the processed frame (with skeleton drawn)
-                self.frames.append(out.copy())
+                # ── Write directly to disk (survives processor destruction) ──
+                h, w = out.shape[:2]
+                if self.writer is None:
+                    self.writer = cv2.VideoWriter(
+                        self._out_path, cv2.VideoWriter_fourcc(*'mp4v'), 20.0, (w, h))
+                self.writer.write(out)
+                self.frame_count += 1
+
+                # Save path to a known location so main thread can find it
+                if self.frame_count % 30 == 0:  # update every 30 frames
+                    with open(self._out_path + ".meta", "w") as mf:
+                        import json as _json
+                        _json.dump({"path": self._out_path,
+                                    "frames": self.frame_count,
+                                    "scores": self.all_scores[-1] if self.all_scores else {},
+                                    }, mf)
+
                 # REC dot top-right
                 cv2.circle(out, (out.shape[1]-25, 20), 8, (0,0,255), -1)
-
                 return av.VideoFrame.from_ndarray(out, format="bgr24")
+
+            def __del__(self):
+                """Called when WebRTC destroys the processor. Finalize the video."""
+                if self.writer:
+                    self.writer.release()
 
         ctx = webrtc_streamer(key="live", mode=WebRtcMode.SENDRECV,
                         rtc_configuration={"iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]},
@@ -299,26 +328,28 @@ with tab_analyze:
                         async_processing=True)
 
         if ctx.state.playing:
-            st.info("🔴 Recording in progress. Perform your shot, then click **Stop**!")
+            st.info("🔴 Recording & Analyzing in progress. Perform your shot, then click **Stop**!")
 
         elif not ctx.state.playing:
+            # The VideoWriter writes directly to disk inside recv().
+            # On stop, release it and read the path from the processor.
             vp = ctx.video_processor
-            frames = getattr(vp, 'frames', []) if vp else []
-            if frames:
-                st.success(f"✅ Captured {len(frames)} frames. Compiling video...")
-                t = tempfile.NamedTemporaryFile(delete=False, suffix='.mp4')
-                out_path = t.name; t.close()
-                h, w, _ = frames[0].shape
-                writer = cv2.VideoWriter(out_path, cv2.VideoWriter_fourcc(*'mp4v'), 30.0, (w, h))
-                for fr in frames: writer.write(fr)
-                writer.release()
-                st.session_state['live_recorded_path'] = out_path
-                st.session_state['live_scores']   = getattr(vp, 'all_scores', [])
-                st.session_state['live_features'] = getattr(vp, 'all_features', [])
-                vp.frames = []
-                st.rerun()
-            elif st.session_state.get('live_recorded_path'):
-                st.success("✅ Recording ready! Click **▶ START ANALYSIS** in the sidebar.")
+            if vp and vp.writer:
+                vp.writer.release()
+                vp.writer = None
+                if vp.frame_count > 0 and os.path.exists(vp._out_path):
+                    st.session_state['live_recorded_path'] = vp._out_path
+                    st.session_state['live_scores']   = vp.all_scores[:]
+                    st.session_state['live_features'] = vp.all_features[:]
+
+            # Check if we have a valid saved recording
+            rpath = st.session_state.get('live_recorded_path', '')
+            if rpath and os.path.exists(rpath) and os.path.getsize(rpath) > 0:
+                fsize_kb = os.path.getsize(rpath) // 1024
+                st.success(f"✅ Session recorded ({fsize_kb} KB). Click **▶ START ANALYSIS** in the sidebar!")
+                with open(rpath, "rb") as vf:
+                    st.download_button("📥 Download Recorded Video (with Skeleton)", vf.read(),
+                                       "cricket_session.mp4", "video/mp4")
 
         st.stop()
 
