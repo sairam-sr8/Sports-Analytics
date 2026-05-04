@@ -334,6 +334,14 @@ with tab_analyze:
         t = tempfile.NamedTemporaryFile(delete=False, suffix='.mp4')
         with open(st.session_state['live_recorded_path'],"rb") as f: t.write(f.read())
         t.close(); temp_video, ready = t, True
+        # Offer the recorded video as an immediate download
+        with open(st.session_state['live_recorded_path'], "rb") as vid_file:
+            st.download_button(
+                label="📥 Download Recorded Video (with Skeleton)",
+                data=vid_file.read(),
+                file_name="cricket_session_recording.mp4",
+                mime="video/mp4"
+            )
 
     if not ready:
         c1, c2, c3 = st.columns(3)
