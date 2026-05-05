@@ -157,12 +157,25 @@ with tab_analyze:
         big_card(c4, session_scores['power_score'],     "Power",     "💥")
         big_card(c5, session_scores['timing_score'],    "Timing",    "⏱️")
 
-        # Most common shot
+        # Most common shot — use the labels already collected during analysis
+        # (do NOT re-run classify_frame here; it resets the window and returns Analyzing)
         from collections import Counter
-        all_shots  = [shot_cls.classify_frame(f)[1] for f in all_features]
-        top_shot   = Counter(all_shots).most_common(1)[0][0] if all_shots else "Unknown"
-        all_phases = [phase_det.detect_phase(f)[1] for f in all_features]
-        top_phase  = Counter(all_phases).most_common(1)[0][0] if all_phases else "Unknown"
+        # Filter out "Analyzing..." frames — we want the definitive committed shot
+        committed_shots = [s for s in all_shot_labels if s != "Analyzing..."]
+        if committed_shots:
+            top_shot = Counter(committed_shots).most_common(1)[0][0]
+        elif all_shot_labels:
+            # Fallback: classify the single frame with the highest swing arc
+            best_frame = max(all_features, key=lambda f: f.get('bat_swing_arc', 0.0))
+            _tmp_cls = ShotClassifier()
+            for _ in range(6):  # fill window
+                _tmp_cls.classify_frame(best_frame)
+            top_shot = _tmp_cls.classify_frame(best_frame)[1]
+        else:
+            top_shot = "Unknown"
+        committed_phases = [p for p in all_phase_labels if p not in ("Setup", "Stance")]
+        top_phase = Counter(committed_phases).most_common(1)[0][0] if committed_phases else (
+            Counter(all_phase_labels).most_common(1)[0][0] if all_phase_labels else "Unknown")
 
         ic1, ic2 = st.columns(2)
         ic1.info(f"🏏 Primary Shot Detected: **{top_shot}**")
@@ -422,7 +435,9 @@ with tab_analyze:
         shot_cls    = ShotClassifier()
 
         all_scores, all_features = [], []
+        all_shot_labels, all_phase_labels = [], []   # collected once during loop
         frame_counter, ts = 0, 0
+        SKIP = 2  # process every frame, but only refresh UI every N frames
 
         while cap.isOpened():
             ret, frame = cap.read()
@@ -437,6 +452,8 @@ with tab_analyze:
                 phase_id, phase_name, _ = phase_det.detect_phase(feats)
                 shot_id, shot_name, _   = shot_cls.classify_frame(feats)
                 all_scores.append(scores); all_features.append(feats)
+                all_shot_labels.append(shot_name)
+                all_phase_labels.append(phase_name)
                 ov = scores['overall_score']
                 bal, stab, pwr, tim = (scores['balance_score'], scores['stability_score'],
                                        scores['power_score'], scores['timing_score'])
@@ -471,8 +488,9 @@ with tab_analyze:
                 m_phase.markdown(text_card(phase_name, "🔄 Phase", "#60A5FA"), unsafe_allow_html=True)
                 m_shot.markdown(text_card(f"{SHOT_EMOJIS.get(shot_id,'')}{shot_name}", "🏏 Shot", "#A78BFA"), unsafe_allow_html=True)
 
-            vid_frame.image(out, channels="BGR", use_container_width=True)
-            time.sleep(0.01)
+            # Only push frame to UI every SKIP frames to reduce lag
+            if frame_counter % SKIP == 0:
+                vid_frame.image(out, channels="BGR", use_container_width=True)
 
         cap.release()
         detector.close()
@@ -480,6 +498,12 @@ with tab_analyze:
         # ── SESSION SUMMARY ────────────────────────────────
         if all_scores:
             render_session_summary(all_scores, all_features, getattr(video_file, 'name', 'sample'))
+            # Show final committed shot prominently
+            committed = [s for s in all_shot_labels if s != "Analyzing..."]
+            if committed:
+                from collections import Counter
+                final_shot = Counter(committed).most_common(1)[0][0]
+                st.success(f"🏏 **Final Shot Identified: {final_shot}** (detected in {len(committed)} out of {len(all_shot_labels)} frames)")
 
 
 # ════════════════════════════════════════════════════════════
