@@ -248,10 +248,9 @@ class ShotClassifier:
 
         # ── CUT SHOT ────────────────────────────────────────────────────
         # Weight on back foot (back knee straight), bat swings square/diagonal.
-        # r_knee stays relatively straight, bat_plane diagonal.
-        # IMPORTANT: arm must NOT be very high (that would be a cut vs pull confusion).
-        #            Add r_sh_elev < 90° guard to prevent pull shots being cut shots.
-        if r_knee > 150 and swing_arc > 0.02 and 50 < sh_rot < 120 and bat_plane > 40 and r_sh_elev < 90:
+        # bat_plane MUST be DIAGONAL (40–95°) — NOT horizontal (>95° = defensive push/sweep)
+        # r_sh_elev < 90° prevents pull shots being classified as cut shots.
+        if r_knee > 150 and swing_arc > 0.02 and 50 < sh_rot < 120 and 40 < bat_plane < 95 and r_sh_elev < 90:
             confidence = min(1.0, 0.5 + bat_plane / 180)
             return (SHOT_CUT_SHOT, confidence)
 
@@ -266,8 +265,9 @@ class ShotClassifier:
         if r_elbow < 90 and hip_rot < 50:
             confidence = min(1.0, 0.5 + (90 - r_elbow) / 90)
             return (SHOT_DEFENSIVE, confidence)
-        if bat_plane > 100 and r_sh_elev < 50 and swing_arc < 0.12:
-            # Near-horizontal bat + arm close to body = defensive push/block
+        if bat_plane > 100 and r_sh_elev < 50 and swing_arc < 0.12 and sh_rot > 90:
+            # Near-horizontal bat + arm close to body + body square-on = defensive push/block
+            # Guard: sh_rot > 90 prevents straight drives (sh_rot~66°) from triggering this
             confidence = min(1.0, 0.5 + (bat_plane - 100) / 80)
             return (SHOT_DEFENSIVE, confidence)
 
@@ -299,8 +299,10 @@ class ShotClassifier:
                 # Very high body rotation = off-side drive (Cover Drive)
                 confidence = min(1.0, 0.5 + (sh_rot - 100) / 80)
                 return (SHOT_COVER_DRIVE, confidence)
-            elif sh_rot <= 80 and hip_rot <= 80:
-                # Low body rotation = straight/on-side drive
+            elif sh_rot <= 80:
+                # LOW shoulder rotation = Straight Drive (body facing toward bowler).
+                # Do NOT require hip_rot <= 80 — hip_rot can be noisy with few frames.
+                # VERIFIED: Straight Drive video shows sh_rot=65.9° in real data.
                 confidence = min(1.0, 0.5 + (80 - sh_rot) / 80)
                 return (SHOT_STRAIGHT_DRIVE, confidence)
             elif sh_rot > 80:
