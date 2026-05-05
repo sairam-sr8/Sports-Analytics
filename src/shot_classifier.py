@@ -260,21 +260,33 @@ class ShotClassifier:
 
         # ── COVER DRIVE vs STRAIGHT DRIVE ───────────────────────────────
         # PRIMARY discriminator: shoulder_rotation_angle + hip_rotation_angle
-        # Cover Drive  : sh_rot ~124°, hip_rot ~136°, bat_plane near-vertical (< 50°)
-        # Straight Drive: sh_rot ~41°,  hip_rot ~49°,  bat_plane near-vertical (< 50°)
-        if r_elbow > 120 and swing_arc > 0.015:
-            if sh_rot > 80 and hip_rot > 80:
-                confidence = min(1.0, 0.5 + (sh_rot - 80) / 100)
+        # These are stable across the ENTIRE swing phase unlike elbow_angle.
+        #
+        # REAL DATA (measured from actual videos):
+        #   Cover Drive  : sh_rot=123°, hip_rot=162° — high body rotation to off-side
+        #   Straight Drive: sh_rot~41°, hip_rot~49°  — low rotation, body facing straight
+        #
+        # NOTE: r_elbow_angle is NOT used as gate — it varies 24°→167° during swing arc
+        #       and was blocking correct Cover Drive detection in real videos.
+        #
+        # Boundary: sh_rot > 100 AND hip_rot > 100 → Cover Drive (clearly rotated)
+        #           sh_rot <= 80 AND hip_rot <= 80  → Straight Drive (low rotation)
+        if swing_arc > 0.015:
+            if sh_rot > 100 and hip_rot > 100:
+                # Very high body rotation = off-side drive (Cover Drive)
+                confidence = min(1.0, 0.5 + (sh_rot - 100) / 80)
                 return (SHOT_COVER_DRIVE, confidence)
             elif sh_rot <= 80 and hip_rot <= 80:
-                confidence = min(1.0, 0.5 + (80 - sh_rot) / 100)
+                # Low body rotation = straight/on-side drive
+                confidence = min(1.0, 0.5 + (80 - sh_rot) / 80)
                 return (SHOT_STRAIGHT_DRIVE, confidence)
+            elif sh_rot > 80:
+                # Moderate-high rotation — likely Cover Drive
+                return (SHOT_COVER_DRIVE, 0.55)
             else:
-                # Mixed signals
-                if sh_rot > 60:
-                    return (SHOT_COVER_DRIVE, 0.55)
-                else:
-                    return (SHOT_STRAIGHT_DRIVE, 0.55)
+                # Moderate-low rotation — likely Straight Drive
+                return (SHOT_STRAIGHT_DRIVE, 0.55)
+
 
         # Default — not enough motion or unclear posture
         return (SHOT_UNKNOWN, 0.3)
