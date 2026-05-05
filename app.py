@@ -460,6 +460,7 @@ with tab_analyze:
         status_text.empty()
 
         # ── PHASE 2: Determine final committed shot (peak-frame analysis) ──
+        from collections import Counter
         _final_cls = ShotClassifier()
         final_shot_id, final_shot, final_conf = _final_cls.classify_video_features(all_features)
 
