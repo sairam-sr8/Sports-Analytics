@@ -256,10 +256,19 @@ class ShotClassifier:
             return (SHOT_CUT_SHOT, confidence)
 
         # ── DEFENSIVE BLOCK ─────────────────────────────────────────────
-        # Very bent elbow (~60°) is the clearest indicator — soft hands.
-        # Real data: right_elbow mean=60°, hip_rot mean=27°.
+        # Two ways to detect:
+        # METHOD 1 (original): Very bent elbow (<90°) + low hip rotation
+        #   Catches front-foot defensive with compact, closed stance
+        # METHOD 2 (from real video): bat_plane very horizontal (>100°) + arm low (<50°)
+        #   In a defensive push, bat comes DOWN steeply — bat appears horizontal from side view
+        #   REAL DATA: bat_plane=136°, r_sh_elev=19.9° in defensive block video
+        #   CONTRAST:  bat_plane=7°,   r_sh_elev=30.7° in Cover Drive video
         if r_elbow < 90 and hip_rot < 50:
             confidence = min(1.0, 0.5 + (90 - r_elbow) / 90)
+            return (SHOT_DEFENSIVE, confidence)
+        if bat_plane > 100 and r_sh_elev < 50 and swing_arc < 0.12:
+            # Near-horizontal bat + arm close to body = defensive push/block
+            confidence = min(1.0, 0.5 + (bat_plane - 100) / 80)
             return (SHOT_DEFENSIVE, confidence)
 
         # ── SQUARE DRIVE ─────────────────────────────────────────────────
