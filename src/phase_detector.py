@@ -127,20 +127,20 @@ class PhaseDetector:
         # 4. Prior phase (state machine)
 
         # SETUP: Almost no movement at all
-        if swing_arc < self._thresh * 2 and abs(recent_vel) < self._thresh:
+        if swing_arc < self._thresh * 3 and abs(window_vel) < self._thresh * 1.5:
             self._seen_backswing = False
             self._seen_impact    = False
             phase = PHASE_SETUP if hip_rot < 10 else PHASE_STANCE
             confidence = 0.7 if swing_arc < self._thresh else 0.5
 
         # BACKSWING: Wrist is moving upward (wrist Y relative to shoulder becomes more negative)
-        elif recent_vel < -self._thresh:
+        elif window_vel < -self._thresh:
             self._seen_backswing = True
             phase = PHASE_BACKSWING
-            confidence = min(1.0, abs(recent_vel) / (self._thresh * 5))
+            confidence = min(1.0, abs(window_vel) / (self._thresh * 5))
 
         # DOWNSWING / IMPACT: Wrist moving downward (Y increasing)
-        elif recent_vel > self._thresh and self._seen_backswing:
+        elif window_vel > self._thresh and self._seen_backswing:
             elbow_avg = np.mean(list(self._elbow_history))
             # Impact zone: elbow is most extended (higher angle) + high swing arc
             if elbow_avg > 130 and swing_arc > 0.15:
@@ -150,7 +150,7 @@ class PhaseDetector:
                 confidence = min(1.0, swing_arc / 0.3)
             else:
                 phase = PHASE_DOWNSWING
-                confidence = min(1.0, abs(recent_vel) / (self._thresh * 5))
+                confidence = min(1.0, abs(window_vel) / (self._thresh * 5))
 
         # FOLLOW THROUGH: After impact, wrist moving upward again
         elif self._seen_impact:

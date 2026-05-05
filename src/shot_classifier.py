@@ -212,8 +212,8 @@ class ShotClassifier:
             return (SHOT_DEFENSIVE, 0.85)
 
         # ── COVER DRIVE ───────────────────────────────────────
-        # High shoulder rotation, good lean forward, arm extended
-        if sh_rot > 40 and trunk_lean > 10 and r_elbow > 130 and hip_rot > 25:
+        # High shoulder rotation, good lean forward, arm extended, active swing
+        if sh_rot > 40 and trunk_lean > 10 and r_elbow > 130 and hip_rot > 25 and swing_arc > 0.05:
             confidence = min(1.0, 0.5 + (sh_rot - 40) / 60)
             return (SHOT_COVER_DRIVE, confidence)
 

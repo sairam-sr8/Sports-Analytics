@@ -423,8 +423,8 @@ class PoseDetector:
         # so sending 4K images just slows down the pipeline with no benefit.
         h, w = frame_bgr.shape[:2]
         max_dim = max(h, w)
-        if max_dim > 1280:
-            scale = 1280 / max_dim
+        if max_dim > 640:
+            scale = 640 / max_dim
             proc_frame = cv2.resize(frame_bgr, (int(w * scale), int(h * scale)))
         else:
             proc_frame = frame_bgr
