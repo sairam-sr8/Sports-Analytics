@@ -137,7 +137,8 @@ with st.sidebar:
 # ════════════════════════════════════════════════════════════
 with tab_analyze:
 
-    def render_session_summary(all_scores, all_features, video_filename):
+    def render_session_summary(all_scores, all_features, all_shot_labels, all_phase_labels,
+                               final_shot, final_phase, video_filename):
         if not all_scores: return
         st.markdown("---")
         st.markdown("## 🏁 Session Analysis Complete")
@@ -157,29 +158,12 @@ with tab_analyze:
         big_card(c4, session_scores['power_score'],     "Power",     "💥")
         big_card(c5, session_scores['timing_score'],    "Timing",    "⏱️")
 
-        # Most common shot — use the labels already collected during analysis
-        # (do NOT re-run classify_frame here; it resets the window and returns Analyzing)
-        from collections import Counter
-        # Filter out "Analyzing..." frames — we want the definitive committed shot
-        committed_shots = [s for s in all_shot_labels if s != "Analyzing..."]
-        if committed_shots:
-            top_shot = Counter(committed_shots).most_common(1)[0][0]
-        elif all_shot_labels:
-            # Fallback: classify the single frame with the highest swing arc
-            best_frame = max(all_features, key=lambda f: f.get('bat_swing_arc', 0.0))
-            _tmp_cls = ShotClassifier()
-            for _ in range(6):  # fill window
-                _tmp_cls.classify_frame(best_frame)
-            top_shot = _tmp_cls.classify_frame(best_frame)[1]
-        else:
-            top_shot = "Unknown"
-        committed_phases = [p for p in all_phase_labels if p not in ("Setup", "Stance")]
-        top_phase = Counter(committed_phases).most_common(1)[0][0] if committed_phases else (
-            Counter(all_phase_labels).most_common(1)[0][0] if all_phase_labels else "Unknown")
-
         ic1, ic2 = st.columns(2)
-        ic1.info(f"🏏 Primary Shot Detected: **{top_shot}**")
-        ic2.info(f"🔄 Dominant Phase: **{top_phase}**")
+        ic1.info(f"🏏 Primary Shot Detected: **{final_shot}**")
+        ic2.info(f"🔄 Dominant Phase: **{final_phase}**")
+
+        top_shot  = final_shot
+        top_phase = final_phase
 
         # SHAP Coaching Tips
         st.markdown('<p class="section-title">🧠 AI Coach Insights (SHAP Explainability)</p>',
@@ -408,41 +392,38 @@ with tab_analyze:
     # ── VIDEO ANALYSIS LOOP ────────────────────────────────
     col_vid, col_metrics = st.columns([3, 2])
     with col_vid:
-        st.markdown('<p class="section-title">📹 Video Feed</p>', unsafe_allow_html=True)
-        vid_frame = st.empty()
+        st.markdown('<p class="section-title">📹 Video Preview</p>', unsafe_allow_html=True)
+        st.info("👆 Click **▶ START ANALYSIS** to begin. Results will appear below after processing.")
     with col_metrics:
-        st.markdown('<p class="section-title">📊 Live Telemetry</p>', unsafe_allow_html=True)
-        # Row 1: Overall spans full width
-        m_overall = st.empty()
-        # Row 2: Balance | Stability
-        row2_c1, row2_c2 = st.columns(2)
-        with row2_c1: m_balance   = st.empty()
-        with row2_c2: m_stability = st.empty()
-        # Row 3: Power | Timing
-        row3_c1, row3_c2 = st.columns(2)
-        with row3_c1: m_power  = st.empty()
-        with row3_c2: m_timing = st.empty()
-        # Row 4: Phase | Shot
-        row4_c1, row4_c2 = st.columns(2)
-        with row4_c1: m_phase = st.empty()
-        with row4_c2: m_shot  = st.empty()
+        st.markdown('<p class="section-title">📊 Results Panel</p>', unsafe_allow_html=True)
+        st.markdown("Analysis results will appear here after processing is complete.")
 
     if st.sidebar.button("▶ START ANALYSIS", use_container_width=True, type="primary"):
         cap = cv2.VideoCapture(temp_video.name)
+        fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
+        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT)) or 1
+
         detector    = PoseDetector(smoothing_window=5)
         extractor   = FeatureExtractor()
         phase_det   = PhaseDetector()
         shot_cls    = ShotClassifier()
 
         all_scores, all_features = [], []
-        all_shot_labels, all_phase_labels = [], []   # collected once during loop
+        all_shot_labels, all_phase_labels = [], []
+        timeline_events = []   # [{"ts": 1.2, "phase": .., "shot": .., "score": ..}]
         frame_counter, ts = 0, 0
-        SKIP = 2  # process every frame, but only refresh UI every N frames
+        last_event_sec = -1.0
+
+        # ── PHASE 1: Pre-process all frames (no UI updates inside loop) ──
+        progress_bar = st.progress(0, text="🔄 Analysing video...")
+        status_text  = st.empty()
 
         while cap.isOpened():
             ret, frame = cap.read()
             if not ret: break
-            frame_counter += 1; ts += 33
+            frame_counter += 1
+            ts += int(1000 / fps)
+            current_sec = frame_counter / fps
 
             out, lm = detector.process_frame(frame, ts)
             feats = extractor.extract_features(lm)
@@ -451,59 +432,69 @@ with tab_analyze:
                 scores = scorer.score_features(feats)
                 phase_id, phase_name, _ = phase_det.detect_phase(feats)
                 shot_id, shot_name, _   = shot_cls.classify_frame(feats)
-                all_scores.append(scores); all_features.append(feats)
+                all_scores.append(scores)
+                all_features.append(feats)
                 all_shot_labels.append(shot_name)
                 all_phase_labels.append(phase_name)
-                ov = scores['overall_score']
-                bal, stab, pwr, tim = (scores['balance_score'], scores['stability_score'],
-                                       scores['power_score'], scores['timing_score'])
-                # --- NO TEXT OVERLAID ON VIDEO ---
-                # Scores shown exclusively in the right-side panel
-                # Only the skeleton (drawn by PoseDetector) remains on the frame
 
-                def card(val, title, color=None):
-                    cls = "bad" if val < 50 else "warn" if val < 70 else ""
-                    style = f'color:{color};' if color else ''
-                    return (f'<div class="metric-card"><div class="metric-title">{title}</div>'
-                            f'<div class="metric-value {cls}" style="{style}">{val}</div></div>')
+                # Record a timeline event every 1 second
+                if current_sec - last_event_sec >= 1.0:
+                    timeline_events.append({
+                        "Time": f"{current_sec:.1f}s",
+                        "Phase": phase_name,
+                        "Shot": shot_name,
+                        "Overall": scores['overall_score'],
+                        "Balance": scores['balance_score'],
+                        "Power": scores['power_score'],
+                    })
+                    last_event_sec = current_sec
 
-                def text_card(text, title, color="#60A5FA"):
-                    return (f'<div class="metric-card"><div class="metric-title">{title}</div>'
-                            f'<div style="color:{color};font-size:.95rem;font-weight:700;padding-top:4px">{text}</div></div>')
-
-                # Row 1: Overall (full width, larger)
-                ov_cls = "bad" if ov < 50 else "warn" if ov < 70 else ""
-                m_overall.markdown(
-                    f'<div class="metric-card" style="background:linear-gradient(135deg,#111827,#1e2d45);border-color:#374151;">'
-                    f'<div class="metric-title">🎯 Overall Technique Score</div>'
-                    f'<div class="metric-value {ov_cls}" style="font-size:2.8rem">{ov}/100</div></div>',
-                    unsafe_allow_html=True)
-                # Row 2: Balance | Stability
-                m_balance.markdown(card(bal,  "⚖️ Balance"),   unsafe_allow_html=True)
-                m_stability.markdown(card(stab, "🎯 Stability"), unsafe_allow_html=True)
-                # Row 3: Power | Timing
-                m_power.markdown(card(pwr,  "💥 Power"),   unsafe_allow_html=True)
-                m_timing.markdown(card(tim,  "⏱️ Timing"),  unsafe_allow_html=True)
-                # Row 4: Phase | Shot
-                m_phase.markdown(text_card(phase_name, "🔄 Phase", "#60A5FA"), unsafe_allow_html=True)
-                m_shot.markdown(text_card(f"{SHOT_EMOJIS.get(shot_id,'')}{shot_name}", "🏏 Shot", "#A78BFA"), unsafe_allow_html=True)
-
-            # Only push frame to UI every SKIP frames to reduce lag
-            if frame_counter % SKIP == 0:
-                vid_frame.image(out, channels="BGR", use_container_width=True)
+            # Update progress bar every 30 frames
+            if frame_counter % 30 == 0:
+                pct = min(frame_counter / total_frames, 1.0)
+                progress_bar.progress(pct, text=f"🔄 Analysing frame {frame_counter}/{total_frames}...")
 
         cap.release()
         detector.close()
+        progress_bar.progress(1.0, text="✅ Analysis complete!")
+        status_text.empty()
 
-        # ── SESSION SUMMARY ────────────────────────────────
+        # ── PHASE 2: Determine final committed shot ──
+        from collections import Counter
+        committed = [s for s in all_shot_labels if s != "Analyzing..."]
+        if committed:
+            final_shot = Counter(committed).most_common(1)[0][0]
+        elif all_features:
+            best_frame = max(all_features, key=lambda f: f.get('bat_swing_arc', 0.0))
+            _tmp = ShotClassifier()
+            for _ in range(7): _tmp.classify_frame(best_frame)
+            final_shot = _tmp.classify_frame(best_frame)[1]
+        else:
+            final_shot = "Unknown"
+
+        committed_phases = [p for p in all_phase_labels if p not in ("Setup", "Stance")]
+        final_phase = Counter(committed_phases).most_common(1)[0][0] if committed_phases else (
+            Counter(all_phase_labels).most_common(1)[0][0] if all_phase_labels else "Unknown")
+
+        # ── PHASE 3: Show final shot banner ──
+        shot_emoji = {
+            "Cover Drive": "🏏➡️", "Pull Shot": "💪⬆️", "Straight Drive": "🏏⬆️",
+            "Sweep Shot": "🏏⬇️", "Defensive Block": "🛡️"
+        }.get(final_shot, "🏏")
+        st.success(f"{shot_emoji} **Shot Identified: {final_shot}** — Dominant Phase: **{final_phase}**")
+
+        # ── PHASE 4: Timestamp Timeline ──
+        if timeline_events:
+            import pandas as pd
+            st.markdown('<p class="section-title">⏱️ Second-by-Second Timeline</p>', unsafe_allow_html=True)
+            df_tl = pd.DataFrame(timeline_events)
+            st.dataframe(df_tl, use_container_width=True, hide_index=True)
+
+        # ── PHASE 5: Full session summary ──
         if all_scores:
-            render_session_summary(all_scores, all_features, getattr(video_file, 'name', 'sample'))
-            # Show final committed shot prominently
-            committed = [s for s in all_shot_labels if s != "Analyzing..."]
-            if committed:
-                from collections import Counter
-                final_shot = Counter(committed).most_common(1)[0][0]
-                st.success(f"🏏 **Final Shot Identified: {final_shot}** (detected in {len(committed)} out of {len(all_shot_labels)} frames)")
+            render_session_summary(all_scores, all_features, all_shot_labels, all_phase_labels,
+                                   final_shot, final_phase,
+                                   getattr(video_file, 'name', 'sample'))
 
 
 # ════════════════════════════════════════════════════════════

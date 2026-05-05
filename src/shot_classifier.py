@@ -128,9 +128,10 @@ class ShotClassifier:
         swing_arc = avg.get('bat_swing_arc', 0.0)
 
         # ML CLASSIFICATION
-        # Only use ML if there is actual swing movement, because the model
-        # was NOT trained on the "Analyzing..." (stationary) class.
-        if self.model_loaded and self.model is not None and swing_arc >= 0.04:
+        # Only use ML if there is actual swing movement.
+        # Threshold lowered to 0.008 to match real normalized coordinate values
+        # (bat_swing_arc is typically 0.005-0.08 for actual swings).
+        if self.model_loaded and self.model is not None and swing_arc >= 0.008:
             # Prepare dataframe row
             available_features = [f for f in self.feature_columns if f in avg]
             if len(available_features) > 10:  # Need minimum features
@@ -211,18 +212,18 @@ class ShotClassifier:
 
         # ── DEFENSIVE BLOCK ───────────────────────────────────
         # Very little swing arc, elbow bent, minimal hip rotation
-        if swing_arc < 0.04 and r_elbow < 120 and hip_rot < 15:
+        if swing_arc < 0.008 and r_elbow < 120 and hip_rot < 15:
             return (SHOT_DEFENSIVE, 0.85)
 
         # ── COVER DRIVE ───────────────────────────────────────
         # High shoulder rotation, good lean forward, arm extended, active swing
-        if sh_rot > 40 and trunk_lean > 10 and r_elbow > 130 and hip_rot > 25 and swing_arc > 0.05:
+        if sh_rot > 40 and trunk_lean > 10 and r_elbow > 130 and hip_rot > 25 and swing_arc > 0.008:
             confidence = min(1.0, 0.5 + (sh_rot - 40) / 60)
             return (SHOT_COVER_DRIVE, confidence)
 
         # ── STRAIGHT DRIVE ────────────────────────────────────
         # Lower shoulder rotation (hitting straight), arm extended, active swing
-        if sh_rot < 40 and r_elbow > 130 and trunk_lean > 8 and swing_arc > 0.05:
+        if sh_rot < 40 and r_elbow > 130 and trunk_lean > 8 and swing_arc > 0.008:
             confidence = min(1.0, 0.5 + r_elbow / 200)
             return (SHOT_STRAIGHT_DRIVE, confidence)
 

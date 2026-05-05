@@ -67,7 +67,7 @@ class PhaseDetector:
     Classifies the current batting phase using temporal wrist kinematics.
     """
 
-    def __init__(self, window=8, movement_threshold=0.008):
+    def __init__(self, window=8, movement_threshold=0.003):
         """
         Args:
             window (int):               Frames to look back for velocity calc.
@@ -126,8 +126,8 @@ class PhaseDetector:
         # 3. Elbow angle (extension → impact zone)
         # 4. Prior phase (state machine)
 
-        # SETUP: Almost no movement at all
-        if swing_arc < self._thresh * 3 and abs(window_vel) < self._thresh * 1.5:
+        # SETUP: Almost no movement at all (very tight gate — real swings have arc > 0.005)
+        if swing_arc < self._thresh * 2 and abs(window_vel) < self._thresh:
             self._seen_backswing = False
             self._seen_impact    = False
             phase = PHASE_SETUP if hip_rot < 10 else PHASE_STANCE
@@ -142,8 +142,8 @@ class PhaseDetector:
         # DOWNSWING / IMPACT: Wrist moving downward (Y increasing)
         elif window_vel > self._thresh and self._seen_backswing:
             elbow_avg = np.mean(list(self._elbow_history))
-            # Impact zone: elbow is most extended (higher angle) + high swing arc
-            if elbow_avg > 130 and swing_arc > 0.15:
+            # Impact zone: elbow is most extended (higher angle) + active swing
+            if elbow_avg > 130 and swing_arc > 0.04:
                 phase = PHASE_IMPACT
                 self._seen_impact = True
                 self._frames_since_impact = 0
