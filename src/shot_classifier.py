@@ -125,9 +125,12 @@ class ShotClassifier:
 
         # Average key features over the window for stability
         avg = self._average_features()
+        swing_arc = avg.get('bat_swing_arc', 0.0)
 
         # ML CLASSIFICATION
-        if self.model_loaded and self.model is not None:
+        # Only use ML if there is actual swing movement, because the model
+        # was NOT trained on the "Analyzing..." (stationary) class.
+        if self.model_loaded and self.model is not None and swing_arc >= 0.04:
             # Prepare dataframe row
             available_features = [f for f in self.feature_columns if f in avg]
             if len(available_features) > 10:  # Need minimum features
@@ -158,7 +161,7 @@ class ShotClassifier:
             else:
                 shot_id, confidence = self._classify_from_averages(avg)
         else:
-            # HEURISTIC CLASSIFICATION (Original behavior)
+            # HEURISTIC CLASSIFICATION (Original behavior or if no swing)
             shot_id, confidence = self._classify_from_averages(avg)
 
         # Smooth with recent history
@@ -218,8 +221,8 @@ class ShotClassifier:
             return (SHOT_COVER_DRIVE, confidence)
 
         # ── STRAIGHT DRIVE ────────────────────────────────────
-        # Lower shoulder rotation (hitting straight), arm extended
-        if sh_rot < 40 and r_elbow > 130 and trunk_lean > 8:
+        # Lower shoulder rotation (hitting straight), arm extended, active swing
+        if sh_rot < 40 and r_elbow > 130 and trunk_lean > 8 and swing_arc > 0.05:
             confidence = min(1.0, 0.5 + r_elbow / 200)
             return (SHOT_STRAIGHT_DRIVE, confidence)
 
