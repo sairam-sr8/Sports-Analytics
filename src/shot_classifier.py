@@ -43,38 +43,50 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from ml_trainer import MLTrainer
 
 # Shot ID constants
-SHOT_UNKNOWN       = 0
-SHOT_COVER_DRIVE   = 1
-SHOT_PULL_SHOT     = 2
+SHOT_UNKNOWN        = 0
+SHOT_COVER_DRIVE    = 1
+SHOT_PULL_SHOT      = 2
 SHOT_STRAIGHT_DRIVE = 3
-SHOT_SWEEP_SHOT    = 4
-SHOT_DEFENSIVE     = 5
+SHOT_SWEEP_SHOT     = 4
+SHOT_DEFENSIVE      = 5
+SHOT_CUT_SHOT       = 6
+SHOT_HOOK_SHOT      = 7
+SHOT_SLOG_SWEEP     = 8
 
 SHOT_NAMES = {
     SHOT_UNKNOWN:        "Analyzing...",
-    SHOT_COVER_DRIVE:   "Cover Drive",
-    SHOT_PULL_SHOT:     "Pull Shot",
+    SHOT_COVER_DRIVE:    "Cover Drive",
+    SHOT_PULL_SHOT:      "Pull Shot",
     SHOT_STRAIGHT_DRIVE: "Straight Drive",
-    SHOT_SWEEP_SHOT:    "Sweep Shot",
-    SHOT_DEFENSIVE:     "Defensive Block",
+    SHOT_SWEEP_SHOT:     "Sweep Shot",
+    SHOT_DEFENSIVE:      "Defensive Block",
+    SHOT_CUT_SHOT:       "Cut Shot",
+    SHOT_HOOK_SHOT:      "Hook Shot",
+    SHOT_SLOG_SWEEP:     "Slog Sweep",
 }
 
 SHOT_EMOJIS = {
     SHOT_UNKNOWN:        "🔍",
-    SHOT_COVER_DRIVE:   "🏏➡️",
-    SHOT_PULL_SHOT:     "💪⬆️",
+    SHOT_COVER_DRIVE:    "🏏➡️",
+    SHOT_PULL_SHOT:      "💪⬆️",
     SHOT_STRAIGHT_DRIVE: "🏏⬆️",
-    SHOT_SWEEP_SHOT:    "🏏⬇️",
-    SHOT_DEFENSIVE:     "🛡️",
+    SHOT_SWEEP_SHOT:     "🏏⬇️",
+    SHOT_DEFENSIVE:      "🛡️",
+    SHOT_CUT_SHOT:       "🏏↪️",
+    SHOT_HOOK_SHOT:      "🥊⬆️",
+    SHOT_SLOG_SWEEP:     "💥⬇️",
 }
 
 SHOT_DESCRIPTIONS = {
     SHOT_UNKNOWN:        "Collecting data...",
-    SHOT_COVER_DRIVE:   "Off-side shot through cover region",
-    SHOT_PULL_SHOT:     "Attacking short ball over square leg",
+    SHOT_COVER_DRIVE:    "Off-side shot through cover region",
+    SHOT_PULL_SHOT:      "Attacking short ball over square leg",
     SHOT_STRAIGHT_DRIVE: "Driving straight down the ground",
-    SHOT_SWEEP_SHOT:    "Sweeping across the line of the ball",
-    SHOT_DEFENSIVE:     "Compact block, soft hands",
+    SHOT_SWEEP_SHOT:     "Sweeping across the line of the ball",
+    SHOT_DEFENSIVE:      "Compact block, soft hands",
+    SHOT_CUT_SHOT:       "Late cut behind point, weight on back foot",
+    SHOT_HOOK_SHOT:      "Aggressive hook over square leg, ball above shoulder",
+    SHOT_SLOG_SWEEP:     "Aggressive slog sweep with high power",
 }
 
 class ShotClassifier:
@@ -196,45 +208,66 @@ class ShotClassifier:
         swing_arc  = avg.get('bat_swing_arc', 0.0)
         l_knee     = avg.get('left_knee_bend', 130.0)
         r_knee     = avg.get('right_knee_bend', 150.0)
+        bat_plane  = avg.get('bat_plane_angle', 45.0)   # NEW: 0=vertical, 90=horizontal
 
-        # ── SWEEP SHOT ─────────────────────────────────────────────────
-        # STRONGEST indicator: front knee bent deeply (kneeling position).
-        # Real data: left_knee mean=90°. Threshold: < 115° is very safe.
+        # ── SLOG SWEEP ──────────────────────────────────────────────────
+        # Sweep with very high power: same knee drop as sweep but big arc.
+        # Check BEFORE regular sweep so it gets priority.
+        # Real signature: left_knee < 115°, swing_arc > 0.08, bat_plane > 60° (horizontal)
+        if l_knee < 115 and swing_arc > 0.08 and bat_plane > 60:
+            confidence = min(1.0, 0.6 + swing_arc * 2)
+            return (SHOT_SLOG_SWEEP, confidence)
+
+        # ── REGULAR SWEEP SHOT ──────────────────────────────────────────
+        # Front knee drops deeply — strongest body signature.
+        # Real data: left_knee mean=90°. bat_plane near-horizontal.
         if l_knee < 115 and sh_rot > 80:
             confidence = min(1.0, 0.6 + (115 - l_knee) / 100)
             return (SHOT_SWEEP_SHOT, confidence)
 
-        # ── PULL SHOT ──────────────────────────────────────────────────
-        # Wrists are both high (above or near shoulder) + big swing arc.
-        # Real data: wrist_diff mean=-0.085 (wrist well above shoulder).
-        # Also: right_shoulder_elevation ~69° (arm raised high).
+        # ── HOOK SHOT ───────────────────────────────────────────────────
+        # MORE extreme than Pull: wrists well above head, arm elevation very high.
+        # Check BEFORE Pull Shot so it gets priority.
+        # Real signature: wrist_diff < -0.10 (extremely high wrists), r_sh_elev > 75°
+        if wrist_diff < -0.10 and r_sh_elev > 75 and swing_arc > 0.05:
+            confidence = min(1.0, 0.55 + abs(wrist_diff) * 4)
+            return (SHOT_HOOK_SHOT, confidence)
+
+        # ── PULL SHOT ───────────────────────────────────────────────────
+        # Wrists at/near shoulder level, arm raised, weight slightly back.
+        # Real data: wrist_diff mean=-0.085, r_sh_elev mean=69°.
         if wrist_diff < -0.04 and r_sh_elev > 55 and swing_arc > 0.05:
             confidence = min(1.0, 0.5 + abs(wrist_diff) * 5)
             return (SHOT_PULL_SHOT, confidence)
 
-        # ── DEFENSIVE BLOCK ────────────────────────────────────────────
+        # ── CUT SHOT ────────────────────────────────────────────────────
+        # Weight on back foot (back knee straight), bat swings square/diagonal.
+        # Key: r_knee stays relatively straight (not bent for a drive), bat plane diagonal.
+        # shoulder_rotation 60–110° (square to the wicket, not as rotated as a drive)
+        if r_knee > 150 and swing_arc > 0.02 and 50 < sh_rot < 120 and bat_plane > 40:
+            confidence = min(1.0, 0.5 + bat_plane / 180)
+            return (SHOT_CUT_SHOT, confidence)
+
+        # ── DEFENSIVE BLOCK ─────────────────────────────────────────────
         # Very bent elbow (~60°) is the clearest indicator — soft hands.
         # Real data: right_elbow mean=60°, hip_rot mean=27°.
         if r_elbow < 90 and hip_rot < 50:
             confidence = min(1.0, 0.5 + (90 - r_elbow) / 90)
             return (SHOT_DEFENSIVE, confidence)
 
-        # ── COVER DRIVE vs STRAIGHT DRIVE ─────────────────────────────
-        # The PRIMARY discriminator is shoulder_rotation_angle:
-        # Cover Drive  : high rotation ~124°, hip_rot ~136°
-        # Straight Drive: low rotation ~41°, hip_rot ~49°
-        # Boundary: ~80-90° separates the two clearly.
+        # ── COVER DRIVE vs STRAIGHT DRIVE ───────────────────────────────
+        # PRIMARY discriminator: shoulder_rotation_angle + hip_rotation_angle
+        # Cover Drive  : sh_rot ~124°, hip_rot ~136°, bat_plane near-vertical (< 50°)
+        # Straight Drive: sh_rot ~41°,  hip_rot ~49°,  bat_plane near-vertical (< 50°)
         if r_elbow > 120 and swing_arc > 0.015:
             if sh_rot > 80 and hip_rot > 80:
-                # High body rotation = off-side drive (Cover Drive)
                 confidence = min(1.0, 0.5 + (sh_rot - 80) / 100)
                 return (SHOT_COVER_DRIVE, confidence)
             elif sh_rot <= 80 and hip_rot <= 80:
-                # Low body rotation = straight/on-side drive
                 confidence = min(1.0, 0.5 + (80 - sh_rot) / 100)
                 return (SHOT_STRAIGHT_DRIVE, confidence)
             else:
-                # Mixed signals — lean toward Cover Drive if arm is high
+                # Mixed signals
                 if sh_rot > 60:
                     return (SHOT_COVER_DRIVE, 0.55)
                 else:

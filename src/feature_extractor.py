@@ -38,6 +38,8 @@ FEATURES WE EXTRACT PER FRAME:
   20. head_stability_y          — Nose Y deviation from shoulder midpoint (head drop)
   21. follow_through_angle      — Angle of arms at end of swing phase
   22. backlift_height           — R-Wrist Y position relative to shoulder (backlift height)
+  23. bat_plane_angle           — Angle of wrist-to-elbow vector from vertical (bat plane proxy)
+                                  0°=vertical bat (drives), 90°=horizontal (sweep/pull/cut)
 
 AUTHOR: Cricket Biomechanics Analyzer Project V2
 """
@@ -320,11 +322,30 @@ class FeatureExtractor:
         # Negative means wrist is ABOVE shoulder (great backlift), positive = below
         features['backlift_height'] = round(float(r_wr[1] - r_sh[1]), 4)
 
+        # 23. Bat Plane Angle — angle of the wrist-to-elbow vector from vertical
+        # This is a proxy for the bat's orientation without needing physical bat tracking.
+        # The bat is gripped at the wrist, so the elbow→wrist direction ≈ bat direction.
+        # 0°  = wrist directly above elbow → vertical bat (drives, defensive)
+        # 90° = wrist directly beside elbow → horizontal bat (sweep, pull, cut)
+        elbow_to_wrist = (r_wr[0] - r_el[0], r_wr[1] - r_el[1])  # dx, dy
+        # Vertical reference = (0, -1) because y increases downward in image coords
+        vertical_ref = (0.0, -1.0)
+        etw_len = np.sqrt(elbow_to_wrist[0]**2 + elbow_to_wrist[1]**2)
+        if etw_len > 1e-6:
+            cos_a = (
+                elbow_to_wrist[0] * vertical_ref[0] + elbow_to_wrist[1] * vertical_ref[1]
+            ) / etw_len
+            cos_a = float(np.clip(cos_a, -1.0, 1.0))
+            bat_plane = float(np.degrees(np.arccos(cos_a)))
+        else:
+            bat_plane = 0.0
+        features['bat_plane_angle'] = round(bat_plane, 2)
+
         return features
 
 
     def get_feature_names(self):
-        """Returns ordered list of all 22 feature names."""
+        """Returns ordered list of all 23 feature names."""
         return [
             'right_elbow_angle',       'left_elbow_angle',
             'right_shoulder_elevation','left_shoulder_elevation',
@@ -338,4 +359,5 @@ class FeatureExtractor:
             'feet_width_ratio',        'weight_distribution',
             'head_stability_x',        'head_stability_y',
             'follow_through_angle',    'backlift_height',
+            'bat_plane_angle',
         ]
