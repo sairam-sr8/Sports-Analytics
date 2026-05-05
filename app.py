@@ -389,14 +389,24 @@ with tab_analyze:
         st.info("👈 Upload a video or load the sample from the sidebar to begin.")
         st.stop()
 
-    # ── VIDEO ANALYSIS LOOP ────────────────────────────────
+    # ── TWO COLUMN LAYOUT: Video left, Live Metrics right ──────
     col_vid, col_metrics = st.columns([3, 2])
     with col_vid:
-        st.markdown('<p class="section-title">📹 Video Preview</p>', unsafe_allow_html=True)
-        st.info("👆 Click **▶ START ANALYSIS** to begin. Results will appear below after processing.")
+        st.markdown('<p class="section-title">📹 Live Video Feed</p>', unsafe_allow_html=True)
+        vid_placeholder = st.empty()
+        vid_placeholder.info("👆 Click **▶ START ANALYSIS** in the sidebar to begin.")
     with col_metrics:
-        st.markdown('<p class="section-title">📊 Results Panel</p>', unsafe_allow_html=True)
-        st.markdown("Analysis results will appear here after processing is complete.")
+        st.markdown('<p class="section-title">📊 Live Telemetry</p>', unsafe_allow_html=True)
+        m_overall   = st.empty()
+        row2c1, row2c2 = st.columns(2)
+        with row2c1: m_balance   = st.empty()
+        with row2c2: m_stability = st.empty()
+        row3c1, row3c2 = st.columns(2)
+        with row3c1: m_power  = st.empty()
+        with row3c2: m_timing = st.empty()
+        row4c1, row4c2 = st.columns(2)
+        with row4c1: m_phase = st.empty()
+        with row4c2: m_shot  = st.empty()
 
     if st.sidebar.button("▶ START ANALYSIS", use_container_width=True, type="primary"):
         cap = cv2.VideoCapture(temp_video.name)
@@ -410,13 +420,21 @@ with tab_analyze:
 
         all_scores, all_features = [], []
         all_shot_labels, all_phase_labels = [], []
-        timeline_events = []   # [{"ts": 1.2, "phase": .., "shot": .., "score": ..}]
+        timeline_events = []
         frame_counter, ts = 0, 0
         last_event_sec = -1.0
+        DISPLAY_EVERY = 3   # update UI every N frames to keep smooth
 
-        # ── PHASE 1: Pre-process all frames (no UI updates inside loop) ──
+        def card(val, title):
+            cls = "bad" if val < 50 else "warn" if val < 70 else ""
+            return (f'<div class="metric-card"><div class="metric-title">{title}</div>'
+                    f'<div class="metric-value {cls}">{val}</div></div>')
+
+        def text_card(text, title, color="#60A5FA"):
+            return (f'<div class="metric-card"><div class="metric-title">{title}</div>'
+                    f'<div style="color:{color};font-size:.95rem;font-weight:700;padding-top:4px">{text}</div></div>')
+
         progress_bar = st.progress(0, text="🔄 Analysing video...")
-        status_text  = st.empty()
 
         while cap.isOpened():
             ret, frame = cap.read()
@@ -437,29 +455,54 @@ with tab_analyze:
                 all_shot_labels.append(shot_name)
                 all_phase_labels.append(phase_name)
 
-                # Record a timeline event every 1 second
+                # Timeline: record one event per second
                 if current_sec - last_event_sec >= 1.0:
                     timeline_events.append({
-                        "Time": f"{current_sec:.1f}s",
-                        "Phase": phase_name,
-                        "Shot": shot_name,
+                        "Time":    f"{current_sec:.1f}s",
+                        "Phase":   phase_name,
+                        "Shot":    shot_name,
                         "Overall": scores['overall_score'],
                         "Balance": scores['balance_score'],
-                        "Power": scores['power_score'],
+                        "Power":   scores['power_score'],
                     })
                     last_event_sec = current_sec
+
+                # Update live metrics panel every DISPLAY_EVERY frames
+                if frame_counter % DISPLAY_EVERY == 0:
+                    ov   = scores['overall_score']
+                    bal  = scores['balance_score']
+                    stab = scores['stability_score']
+                    pwr  = scores['power_score']
+                    tim  = scores['timing_score']
+                    ov_cls = "bad" if ov < 50 else "warn" if ov < 70 else ""
+                    m_overall.markdown(
+                        f'<div class="metric-card" style="background:linear-gradient(135deg,#111827,#1e2d45);">'
+                        f'<div class="metric-title">🎯 Overall Score</div>'
+                        f'<div class="metric-value {ov_cls}" style="font-size:2.4rem">{ov}/100</div></div>',
+                        unsafe_allow_html=True)
+                    m_balance.markdown(card(bal,  "⚖️ Balance"),   unsafe_allow_html=True)
+                    m_stability.markdown(card(stab, "🎯 Stability"), unsafe_allow_html=True)
+                    m_power.markdown(card(pwr,  "💥 Power"),        unsafe_allow_html=True)
+                    m_timing.markdown(card(tim,  "⏱️ Timing"),      unsafe_allow_html=True)
+                    m_phase.markdown(text_card(phase_name, "🔄 Phase", "#60A5FA"), unsafe_allow_html=True)
+                    m_shot.markdown(text_card(
+                        f"{SHOT_EMOJIS.get(shot_id,'')}{shot_name}", "🏏 Shot", "#A78BFA"),
+                        unsafe_allow_html=True)
+
+            # Update video frame every DISPLAY_EVERY frames
+            if frame_counter % DISPLAY_EVERY == 0:
+                vid_placeholder.image(out, channels="BGR", use_container_width=True)
 
             # Update progress bar every 30 frames
             if frame_counter % 30 == 0:
                 pct = min(frame_counter / total_frames, 1.0)
-                progress_bar.progress(pct, text=f"🔄 Analysing frame {frame_counter}/{total_frames}...")
+                progress_bar.progress(pct, text=f"🔄 Frame {frame_counter}/{total_frames} — {current_sec:.1f}s")
 
         cap.release()
         detector.close()
         progress_bar.progress(1.0, text="✅ Analysis complete!")
-        status_text.empty()
 
-        # ── PHASE 2: Determine final committed shot (peak-frame analysis) ──
+        # ── Final shot via peak-frame analysis ──────────────────
         from collections import Counter
         _final_cls = ShotClassifier()
         final_shot_id, final_shot, final_conf = _final_cls.classify_video_features(all_features)
@@ -468,14 +511,12 @@ with tab_analyze:
         final_phase = Counter(committed_phases).most_common(1)[0][0] if committed_phases else (
             Counter(all_phase_labels).most_common(1)[0][0] if all_phase_labels else "Unknown")
 
-        # ── PHASE 3: Show final shot banner ──
-        shot_emoji = {
-            "Cover Drive": "🏏➡️", "Pull Shot": "💪⬆️", "Straight Drive": "🏏⬆️",
-            "Sweep Shot": "🏏⬇️", "Defensive Block": "🛡️"
-        }.get(final_shot, "🏏")
-        st.success(f"{shot_emoji} **Shot Identified: {final_shot}** — Dominant Phase: **{final_phase}**")
 
-        # ── PHASE 4: Timestamp Timeline ──
+        # ── Final shot banner ────────────────────────────────────
+        shot_emoji = SHOT_EMOJIS.get(final_shot_id, "🏏")
+        st.success(f"{shot_emoji} **Shot Identified: {final_shot}** (confidence: {final_conf:.0%}) — Phase: **{final_phase}**")
+
+        # ── Timestamp Timeline ───────────────────────────────────
         if timeline_events:
             import pandas as pd
             st.markdown('<p class="section-title">⏱️ Second-by-Second Timeline</p>', unsafe_allow_html=True)
