@@ -226,25 +226,28 @@ class ShotClassifier:
             return (SHOT_SWEEP_SHOT, confidence)
 
         # ── HOOK SHOT ───────────────────────────────────────────────────
-        # MORE extreme than Pull: wrists well above head, arm elevation very high.
-        # Check BEFORE Pull Shot so it gets priority.
-        # Real signature: wrist_diff < -0.10 (extremely high wrists), r_sh_elev > 75°
-        if wrist_diff < -0.10 and r_sh_elev > 75 and swing_arc > 0.05:
-            confidence = min(1.0, 0.55 + abs(wrist_diff) * 4)
+        # Ball above head — arm raised VERY high (nearly vertical upward).
+        # Primary: right_shoulder_elevation > 120° + horizontal bat_plane
+        if r_sh_elev > 120 and swing_arc > 0.04 and bat_plane > 55:
+            confidence = min(1.0, 0.55 + (r_sh_elev - 120) / 100)
             return (SHOT_HOOK_SHOT, confidence)
 
         # ── PULL SHOT ───────────────────────────────────────────────────
-        # Wrists at/near shoulder level, arm raised, weight slightly back.
-        # Real data: wrist_diff mean=-0.085, r_sh_elev mean=69°.
-        if wrist_diff < -0.04 and r_sh_elev > 55 and swing_arc > 0.05:
-            confidence = min(1.0, 0.5 + abs(wrist_diff) * 5)
+        # Arm raised to shoulder height or above for a short-ball attack.
+        # PRIMARY: right_shoulder_elevation > 85° (arm at or above shoulder).
+        # NOTE: wrist_height_diff is NOT reliable as primary — it flips sign
+        #       depending on which side of the batsman faces the camera.
+        # VERIFIED: Real pull shot video shows r_sh_elev = 100.9° in peak frames.
+        if r_sh_elev > 85 and swing_arc > 0.04 and bat_plane > 35:
+            confidence = min(1.0, 0.5 + (r_sh_elev - 85) / 100)
             return (SHOT_PULL_SHOT, confidence)
 
         # ── CUT SHOT ────────────────────────────────────────────────────
         # Weight on back foot (back knee straight), bat swings square/diagonal.
-        # Key: r_knee stays relatively straight (not bent for a drive), bat plane diagonal.
-        # shoulder_rotation 60–110° (square to the wicket, not as rotated as a drive)
-        if r_knee > 150 and swing_arc > 0.02 and 50 < sh_rot < 120 and bat_plane > 40:
+        # r_knee stays relatively straight, bat_plane diagonal.
+        # IMPORTANT: arm must NOT be very high (that would be a cut vs pull confusion).
+        #            Add r_sh_elev < 90° guard to prevent pull shots being cut shots.
+        if r_knee > 150 and swing_arc > 0.02 and 50 < sh_rot < 120 and bat_plane > 40 and r_sh_elev < 90:
             confidence = min(1.0, 0.5 + bat_plane / 180)
             return (SHOT_CUT_SHOT, confidence)
 
