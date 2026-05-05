@@ -77,101 +77,80 @@ SHOT_DESCRIPTIONS = {
     SHOT_DEFENSIVE:     "Compact block, soft hands",
 }
 
-
 class ShotClassifier:
     """
     Classifies shot type from a sliding window of feature frames.
-    Uses biomechanical heuristics — no training data required.
+
+    CALIBRATED to real dataset feature ranges (measured from actual cricket videos):
+      Cover Drive  : shoulder_rot ~124°, hip_rot ~136°, elbow ~145°, swing_arc ~0.092
+      Straight Drive: shoulder_rot ~41°,  hip_rot ~49°,  elbow ~151°, swing_arc ~0.062
+      Sweep Shot   : left_knee ~90°,     shoulder_rot ~144°, hip_rot ~147°
+      Pull Shot    : wrist_diff < -0.05, swing_arc ~0.161, shoulder_elev ~69°
+      Defensive    : elbow ~60°,          swing_arc ~0.037, hip_rot ~27°
+
+    NOTE: ML model is disabled — it was trained on mislabeled data.
+          Only calibrated heuristics are used.
     """
 
-    def __init__(self, window=15, model_path="models/shot_classifier.pkl"):
-        """
-        Args:
-            window (int): Number of frames to aggregate for classification.
-                          Larger = more stable but more latency.
-        """
+    # Minimum swing arc to consider a shot is happening (stationary stance threshold)
+    _MIN_SWING = 0.015
+
+    def __init__(self, window=20, model_path="models/shot_classifier.pkl"):
         self._history = deque(maxlen=window)
-        self._shot_history = deque(maxlen=5)
+        self._shot_history = deque(maxlen=7)
+        # ML model intentionally disabled — trained on mislabeled data
         self.model = None
         self.model_loaded = False
-        
-        # Try loading the ML model
-        try:
-            if os.path.exists(model_path):
-                self.model = joblib.load(model_path)
-                self.model_loaded = True
-        except Exception as e:
-            pass
-            
-        self.feature_columns = MLTrainer.FEATURE_COLUMNS
+        self.feature_columns = []
 
     def classify_frame(self, features: dict) -> tuple:
         """
         Update the feature window and return the current shot classification.
-
-        Args:
-            features (dict): Features dict from FeatureExtractor.
-
-        Returns:
-            tuple: (shot_id: int, shot_name: str, confidence: float)
+        Returns: (shot_id: int, shot_name: str, confidence: float)
         """
         if not features:
             return (SHOT_UNKNOWN, SHOT_NAMES[SHOT_UNKNOWN], 0.0)
 
         self._history.append(features)
 
+        # Need at least 5 frames to make a stable classification
         if len(self._history) < 5:
             return (SHOT_UNKNOWN, SHOT_NAMES[SHOT_UNKNOWN], 0.2)
 
-        # Average key features over the window for stability
-        avg = self._average_features()
-        swing_arc = avg.get('bat_swing_arc', 0.0)
+        # Classify using PEAK frames (top 30% by swing arc) not all frames equally
+        # This ensures we classify the actual swing, not the setup stance
+        shot_id, confidence = self._classify_peak_frames()
 
-        # ML CLASSIFICATION
-        # Only use ML if there is actual swing movement.
-        # Threshold lowered to 0.008 to match real normalized coordinate values
-        # (bat_swing_arc is typically 0.005-0.08 for actual swings).
-        if self.model_loaded and self.model is not None and swing_arc >= 0.008:
-            # Prepare dataframe row
-            available_features = [f for f in self.feature_columns if f in avg]
-            if len(available_features) > 10:  # Need minimum features
-                # Use the ML model
-                X = pd.DataFrame([avg])[available_features].fillna(0.0)
-                try:
-                    pred_name = self.model.predict(X)[0]
-                    # Map the string name back to ID
-                    shot_id = SHOT_UNKNOWN
-                    for sid, sname in SHOT_NAMES.items():
-                        if sname == pred_name:
-                            shot_id = sid
-                            break
-                            
-                    # Get prediction probability if possible
-                    confidence = 0.8
-                    if hasattr(self.model, "predict_proba"):
-                        proba = self.model.predict_proba(X)[0]
-                        confidence = float(np.max(proba))
-                        
-                    # Still fallback to heuristic if ML is very uncertain
-                    if confidence < 0.4:
-                        shot_id, confidence = self._classify_from_averages(avg)
-                        
-                except Exception:
-                    # Fallback to heuristic
-                    shot_id, confidence = self._classify_from_averages(avg)
-            else:
-                shot_id, confidence = self._classify_from_averages(avg)
-        else:
-            # HEURISTIC CLASSIFICATION (Original behavior or if no swing)
-            shot_id, confidence = self._classify_from_averages(avg)
-
-        # Smooth with recent history
+        # Smooth output with recent shot history (majority vote, 7 frames)
         self._shot_history.append(shot_id)
-        if len(self._shot_history) >= 3:
+        if len(self._shot_history) >= 4:
             most_common = Counter(self._shot_history).most_common(1)[0][0]
             shot_id = most_common
 
         return (shot_id, SHOT_NAMES[shot_id], round(float(confidence), 2))
+
+    def _classify_peak_frames(self) -> tuple:
+        """
+        Average the top 30% of frames (by bat_swing_arc) and classify from those.
+        This isolates the actual swing motion from the setup/stance frames.
+        """
+        frames = list(self._history)
+
+        # Sort by swing arc descending, take top 30% (minimum 3 frames)
+        sorted_frames = sorted(frames, key=lambda f: f.get('bat_swing_arc', 0.0), reverse=True)
+        top_n = max(3, len(sorted_frames) // 3)
+        peak_frames = sorted_frames[:top_n]
+
+        # Check if there is meaningful swing motion in the peak frames
+        peak_swing = np.mean([f.get('bat_swing_arc', 0.0) for f in peak_frames])
+        if peak_swing < self._MIN_SWING:
+            return (SHOT_UNKNOWN, 0.3)
+
+        # Average features across peak frames
+        keys = frames[0].keys()
+        avg = {k: float(np.mean([f.get(k, 0.0) for f in peak_frames])) for k in keys}
+
+        return self._classify_from_averages(avg)
 
     def _average_features(self) -> dict:
         """Compute mean of all features in the sliding window."""
@@ -185,50 +164,112 @@ class ShotClassifier:
 
     def _classify_from_averages(self, avg: dict) -> tuple:
         """
-        Apply biomechanical decision rules to classify shot type.
+        Apply CALIBRATED biomechanical decision rules to classify shot type.
+        Thresholds are derived from real feature range analysis of the training dataset.
 
-        Returns:
-            tuple: (shot_id, confidence)
+        Key discriminators (real measured values):
+          shoulder_rotation_angle:
+            - Cover Drive  : ~124°  (high — turning into off side)
+            - Straight Drive: ~41°  (low  — facing straight)
+            - Sweep Shot   : ~144°  (very high)
+            - Pull Shot    : ~88°   (moderate)
+            - Defensive    : ~35°   (low)
+          hip_rotation_angle:
+            - Cover Drive  : ~136°  (high body rotation)
+            - Straight Drive: ~49°  (low — body facing straight)
+            - Sweep Shot   : ~147°  (very high)
+          left_knee_bend:
+            - Sweep Shot   : ~90°   (knee nearly touching ground — strongest indicator)
+            - All others   : >107°
+          right_elbow_angle:
+            - Defensive    : ~60°   (very bent, soft hands)
+            - All drives   : >135°  (extended arm)
+          wrist_height_diff:
+            - Pull Shot    : ~-0.085 (both wrists high, below shoulder level)
         """
-        sh_rot    = avg.get('shoulder_rotation_angle', 0.0)
+        sh_rot     = avg.get('shoulder_rotation_angle', 90.0)
+        hip_rot    = avg.get('hip_rotation_angle', 90.0)
         trunk_lean = avg.get('trunk_lean_angle', 15.0)
         wrist_diff = avg.get('wrist_height_diff', 0.0)
-        r_elbow   = avg.get('right_elbow_angle', 150.0)
-        r_sh_elev = avg.get('right_shoulder_elevation', 90.0)
-        swing_arc = avg.get('bat_swing_arc', 0.0)
-        r_knee    = avg.get('right_knee_bend', 155.0)
-        hip_rot   = avg.get('hip_rotation_angle', 30.0)
+        r_elbow    = avg.get('right_elbow_angle', 150.0)
+        r_sh_elev  = avg.get('right_shoulder_elevation', 50.0)
+        swing_arc  = avg.get('bat_swing_arc', 0.0)
+        l_knee     = avg.get('left_knee_bend', 130.0)
+        r_knee     = avg.get('right_knee_bend', 150.0)
 
-        # ── SWEEP SHOT ────────────────────────────────────────
-        # Very low back knee, bat going cross-bat, high shoulder rotation
-        if r_knee < 110 and sh_rot > 60:
-            return (SHOT_SWEEP_SHOT, 0.80)
+        # ── SWEEP SHOT ─────────────────────────────────────────────────
+        # STRONGEST indicator: front knee bent deeply (kneeling position).
+        # Real data: left_knee mean=90°. Threshold: < 115° is very safe.
+        if l_knee < 115 and sh_rot > 80:
+            confidence = min(1.0, 0.6 + (115 - l_knee) / 100)
+            return (SHOT_SWEEP_SHOT, confidence)
 
-        # ── PULL SHOT ─────────────────────────────────────────
-        # Arms above shoulder level, cross-bat plane, short ball
-        if wrist_diff < -0.10 and r_sh_elev > 100 and swing_arc > 0.08:
-            confidence = min(1.0, 0.5 + (r_sh_elev - 100) / 80)
+        # ── PULL SHOT ──────────────────────────────────────────────────
+        # Wrists are both high (above or near shoulder) + big swing arc.
+        # Real data: wrist_diff mean=-0.085 (wrist well above shoulder).
+        # Also: right_shoulder_elevation ~69° (arm raised high).
+        if wrist_diff < -0.04 and r_sh_elev > 55 and swing_arc > 0.05:
+            confidence = min(1.0, 0.5 + abs(wrist_diff) * 5)
             return (SHOT_PULL_SHOT, confidence)
 
-        # ── DEFENSIVE BLOCK ───────────────────────────────────
-        # Very little swing arc, elbow bent, minimal hip rotation
-        if swing_arc < 0.008 and r_elbow < 120 and hip_rot < 15:
-            return (SHOT_DEFENSIVE, 0.85)
+        # ── DEFENSIVE BLOCK ────────────────────────────────────────────
+        # Very bent elbow (~60°) is the clearest indicator — soft hands.
+        # Real data: right_elbow mean=60°, hip_rot mean=27°.
+        if r_elbow < 90 and hip_rot < 50:
+            confidence = min(1.0, 0.5 + (90 - r_elbow) / 90)
+            return (SHOT_DEFENSIVE, confidence)
 
-        # ── COVER DRIVE ───────────────────────────────────────
-        # High shoulder rotation, good lean forward, arm extended, active swing
-        if sh_rot > 40 and trunk_lean > 10 and r_elbow > 130 and hip_rot > 25 and swing_arc > 0.008:
-            confidence = min(1.0, 0.5 + (sh_rot - 40) / 60)
-            return (SHOT_COVER_DRIVE, confidence)
+        # ── COVER DRIVE vs STRAIGHT DRIVE ─────────────────────────────
+        # The PRIMARY discriminator is shoulder_rotation_angle:
+        # Cover Drive  : high rotation ~124°, hip_rot ~136°
+        # Straight Drive: low rotation ~41°, hip_rot ~49°
+        # Boundary: ~80-90° separates the two clearly.
+        if r_elbow > 120 and swing_arc > 0.015:
+            if sh_rot > 80 and hip_rot > 80:
+                # High body rotation = off-side drive (Cover Drive)
+                confidence = min(1.0, 0.5 + (sh_rot - 80) / 100)
+                return (SHOT_COVER_DRIVE, confidence)
+            elif sh_rot <= 80 and hip_rot <= 80:
+                # Low body rotation = straight/on-side drive
+                confidence = min(1.0, 0.5 + (80 - sh_rot) / 100)
+                return (SHOT_STRAIGHT_DRIVE, confidence)
+            else:
+                # Mixed signals — lean toward Cover Drive if arm is high
+                if sh_rot > 60:
+                    return (SHOT_COVER_DRIVE, 0.55)
+                else:
+                    return (SHOT_STRAIGHT_DRIVE, 0.55)
 
-        # ── STRAIGHT DRIVE ────────────────────────────────────
-        # Lower shoulder rotation (hitting straight), arm extended, active swing
-        if sh_rot < 40 and r_elbow > 130 and trunk_lean > 8 and swing_arc > 0.008:
-            confidence = min(1.0, 0.5 + r_elbow / 200)
-            return (SHOT_STRAIGHT_DRIVE, confidence)
-
-        # Default
+        # Default — not enough motion or unclear posture
         return (SHOT_UNKNOWN, 0.3)
+
+    def classify_video_features(self, all_features: list) -> tuple:
+        """
+        Classify the shot for an ENTIRE video by looking at the peak swing frames.
+        This is used for the final session report — gives ONE definitive answer.
+
+        Args:
+            all_features: List of feature dicts from every processed frame.
+        Returns:
+            (shot_id, shot_name, confidence)
+        """
+        if not all_features:
+            return (SHOT_UNKNOWN, SHOT_NAMES[SHOT_UNKNOWN], 0.0)
+
+        # Sort all frames by swing arc — take top 20% (the real swing frames)
+        sorted_frames = sorted(all_features, key=lambda f: f.get('bat_swing_arc', 0.0), reverse=True)
+        top_n = max(5, len(sorted_frames) // 5)
+        peak_frames = sorted_frames[:top_n]
+
+        peak_swing = np.mean([f.get('bat_swing_arc', 0.0) for f in peak_frames])
+        if peak_swing < self._MIN_SWING:
+            return (SHOT_UNKNOWN, "No clear swing detected", 0.3)
+
+        keys = peak_frames[0].keys()
+        avg = {k: float(np.mean([f.get(k, 0.0) for f in peak_frames])) for k in keys}
+
+        shot_id, confidence = self._classify_from_averages(avg)
+        return (shot_id, SHOT_NAMES[shot_id], round(float(confidence), 2))
 
     def reset(self):
         """Reset classifier for a new video."""

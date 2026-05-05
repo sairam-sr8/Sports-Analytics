@@ -459,18 +459,9 @@ with tab_analyze:
         progress_bar.progress(1.0, text="✅ Analysis complete!")
         status_text.empty()
 
-        # ── PHASE 2: Determine final committed shot ──
-        from collections import Counter
-        committed = [s for s in all_shot_labels if s != "Analyzing..."]
-        if committed:
-            final_shot = Counter(committed).most_common(1)[0][0]
-        elif all_features:
-            best_frame = max(all_features, key=lambda f: f.get('bat_swing_arc', 0.0))
-            _tmp = ShotClassifier()
-            for _ in range(7): _tmp.classify_frame(best_frame)
-            final_shot = _tmp.classify_frame(best_frame)[1]
-        else:
-            final_shot = "Unknown"
+        # ── PHASE 2: Determine final committed shot (peak-frame analysis) ──
+        _final_cls = ShotClassifier()
+        final_shot_id, final_shot, final_conf = _final_cls.classify_video_features(all_features)
 
         committed_phases = [p for p in all_phase_labels if p not in ("Setup", "Stance")]
         final_phase = Counter(committed_phases).most_common(1)[0][0] if committed_phases else (
