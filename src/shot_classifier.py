@@ -52,6 +52,7 @@ SHOT_DEFENSIVE      = 5
 SHOT_CUT_SHOT       = 6
 SHOT_HOOK_SHOT      = 7
 SHOT_SLOG_SWEEP     = 8
+SHOT_SQUARE_DRIVE   = 9
 
 SHOT_NAMES = {
     SHOT_UNKNOWN:        "Analyzing...",
@@ -63,6 +64,7 @@ SHOT_NAMES = {
     SHOT_CUT_SHOT:       "Cut Shot",
     SHOT_HOOK_SHOT:      "Hook Shot",
     SHOT_SLOG_SWEEP:     "Slog Sweep",
+    SHOT_SQUARE_DRIVE:   "Square Drive",
 }
 
 SHOT_EMOJIS = {
@@ -75,6 +77,7 @@ SHOT_EMOJIS = {
     SHOT_CUT_SHOT:       "🏏↪️",
     SHOT_HOOK_SHOT:      "🥊⬆️",
     SHOT_SLOG_SWEEP:     "💥⬇️",
+    SHOT_SQUARE_DRIVE:   "🏏↥",
 }
 
 SHOT_DESCRIPTIONS = {
@@ -87,6 +90,7 @@ SHOT_DESCRIPTIONS = {
     SHOT_CUT_SHOT:       "Late cut behind point, weight on back foot",
     SHOT_HOOK_SHOT:      "Aggressive hook over square leg, ball above shoulder",
     SHOT_SLOG_SWEEP:     "Aggressive slog sweep with high power",
+    SHOT_SQUARE_DRIVE:   "Square drive through point/cover-point region",
 }
 
 class ShotClassifier:
@@ -257,6 +261,16 @@ class ShotClassifier:
         if r_elbow < 90 and hip_rot < 50:
             confidence = min(1.0, 0.5 + (90 - r_elbow) / 90)
             return (SHOT_DEFENSIVE, confidence)
+
+        # ── SQUARE DRIVE ─────────────────────────────────────────────────
+        # MORE square-on than Cover Drive. Body turns further (sh_rot > 140°).
+        # Arm elevation appears higher because body is square-on to camera.
+        # REAL DATA: sh_rot=154.7°, hip_rot=149.4°, r_sh_elev=162.3°, bat_plane=21°
+        # Key: bat_plane near-vertical (<40°) distinguishes from Pull/Hook.
+        #      Check BEFORE Cover Drive so it gets priority.
+        if sh_rot > 140 and hip_rot > 120 and bat_plane < 40 and swing_arc > 0.015:
+            confidence = min(1.0, 0.5 + (sh_rot - 140) / 80)
+            return (SHOT_SQUARE_DRIVE, confidence)
 
         # ── COVER DRIVE vs STRAIGHT DRIVE ───────────────────────────────
         # PRIMARY discriminator: shoulder_rotation_angle + hip_rotation_angle
